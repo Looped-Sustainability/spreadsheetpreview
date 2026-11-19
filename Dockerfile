@@ -5,6 +5,7 @@ COPY src/main.rs ./src/main.rs
 RUN cargo fetch --locked
 COPY src ./src
 COPY assets ./assets
+COPY README.md ./
 ARG REVISION=development
 RUN BUILD_REVISION="$REVISION" cargo build --release --locked --offline
 

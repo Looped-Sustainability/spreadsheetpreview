@@ -24,31 +24,38 @@ cargo build --release --locked
 The server listens on `127.0.0.1:3000` by default. See the configuration below
 to change the address.
 
+`GET /` returns the API instructions below as JSON.
+
+<!-- api-guide:start -->
 ## Request a preview
 
-`GET /` returns a public JSON guide with a copyable request example.
-
+Spreadsheet Preview converts CSV, XLS, and XLSX files into PNG tables.
 Send the file bytes directly in the body of `POST /preview`. Include
 `Authorization: Bearer YOUR_API_KEY`. On success, the server returns HTTP 200
 with `Content-Type: image/png`.
+
+Set `API_KEY` in your shell to the server's bearer key. Set `BASE_URL` to the
+server URL without a trailing slash. The examples use the local server if you
+omit `BASE_URL`.
 
 ```sh
 printf 'Item,Units\nCartons,120\n' | curl --fail --silent --show-error \
   -H 'Content-Type: text/csv' \
   -H "Authorization: Bearer $API_KEY" \
   --data-binary @- \
-  'http://127.0.0.1:3000/preview' \
+  "${BASE_URL:-http://127.0.0.1:3000}/preview" \
   -o preview.png
 ```
 
-To preview the Sales sheet in the included workbook, run this command.
+Use `application/octet-stream` for XLS and XLSX files. To preview the Sales
+sheet, replace `inventory.xlsx` with the path to your workbook.
 
 ```sh
 curl --fail --silent --show-error \
   -H 'Content-Type: application/octet-stream' \
   -H "Authorization: Bearer $API_KEY" \
-  --data-binary @tests/fixtures/inventory.xlsx \
-  'http://127.0.0.1:3000/preview?sheet=Sales' \
+  --data-binary @inventory.xlsx \
+  "${BASE_URL:-http://127.0.0.1:3000}/preview?sheet=Sales" \
   -o sales.png
 ```
 
@@ -76,6 +83,9 @@ server accepts two preview requests at a time.
 | 422 | The server could not read the file or find the requested worksheet. |
 | 503 | Both preview slots are busy. Retry after a delay. |
 
+`GET /healthz` reports `status` and the compiled `revision` without a key.
+<!-- api-guide:end -->
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -95,7 +105,6 @@ bin/check-deploy http://127.0.0.1:3000 development
 docker compose down
 ```
 
-`GET /healthz` reports `status` and the compiled `revision` without a key.
 The [Hatchbox guide](docs/hatchbox.md) gives the web command, port configuration,
 and release check.
 

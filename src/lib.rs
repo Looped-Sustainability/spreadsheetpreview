@@ -46,11 +46,19 @@ pub fn router(executable: PathBuf, api_key: String) -> Router {
         })
 }
 
-async fn api_guide() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "application/json")],
-        include_str!("api-guide.json"),
-    )
+#[derive(serde::Serialize)]
+struct ApiGuide {
+    markdown: &'static str,
+}
+
+async fn api_guide() -> Json<ApiGuide> {
+    let markdown = include_str!("../README.md")
+        .split_once("<!-- api-guide:start -->")
+        .and_then(|(_, rest)| rest.split_once("<!-- api-guide:end -->"))
+        .expect("README must contain the API guide")
+        .0
+        .trim();
+    Json(ApiGuide { markdown })
 }
 
 async fn require_api_key(
