@@ -17,7 +17,11 @@ on `127.0.0.1` to port 8080 in the container. Caddy handles HTTPS.
 Hatchbox runs [the repository build hook](../.hatchbox/build). If a custom build
 script overrides that hook, set the custom script to `./.hatchbox/build`. The
 hook builds the new image before it stops the old container. The service stores
-no uploads on disk and needs no volume or app secrets.
+no uploads on disk and needs no volume.
+
+Before deploying, set `API_KEY` in the Hatchbox app environment. Generate a
+separate key for this app with `openssl rand -hex 32`. Every preview request
+must send it as a bearer key. The health check does not require a key.
 
 After Hatchbox deploys the release, run this command with the public app origin
 and the full commit SHA.
@@ -29,6 +33,8 @@ bin/check-deploy https://YOUR-APP.hatchboxapp.com FULL_COMMIT_SHA
 The check requires a healthy response and an exact match for the commit SHA.
 
 ## Run the container locally
+
+Set `API_KEY` in your shell first.
 
 ```sh
 docker compose up --build --detach --wait

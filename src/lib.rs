@@ -9,13 +9,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
-use axum::extract::{Query, State};
+use axum::extract::{Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{
     Json, Router,
     routing::{get, post},
 };
+use subtle::ConstantTimeEq;
 use table::Options;
 use tokio::sync::Semaphore;
 
@@ -29,14 +31,48 @@ struct Service {
     executable: PathBuf,
 }
 
-pub fn router(executable: PathBuf) -> Router {
+pub fn router(executable: PathBuf, api_key: String) -> Router {
     Router::new()
         .route("/preview", post(preview))
+        .route_layer(middleware::from_fn_with_state(
+            Arc::<str>::from(api_key),
+            require_api_key,
+        ))
         .route("/healthz", get(health))
         .with_state(Service {
             slots: Arc::new(Semaphore::new(2)),
             executable,
         })
+}
+
+async fn require_api_key(
+    State(api_key): State<Arc<str>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let mut values = request.headers().get_all(header::AUTHORIZATION).iter();
+    let credentials = values
+        .next()
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split_once(' '));
+    if let Some((scheme, token)) = credentials
+        && values.next().is_none()
+        && scheme.eq_ignore_ascii_case("Bearer")
+        && bool::from(
+            token
+                .trim_start_matches(' ')
+                .as_bytes()
+                .ct_eq(api_key.as_bytes()),
+        )
+    {
+        return next.run(request).await;
+    }
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::WWW_AUTHENTICATE, "Bearer")],
+        "a valid bearer API key is required",
+    )
+        .into_response()
 }
 
 #[derive(serde::Serialize)]
@@ -133,6 +169,7 @@ async fn preview(
 fn workbook_process(executable: &Path, data: &[u8], options: &Options) -> Result<Vec<u8>, Failure> {
     let (rows, cols) = options.bounds().map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     let mut child = Command::new(executable)
+        .env_remove("API_KEY")
         .arg("--workbook")
         .arg(rows.to_string())
         .arg(cols.to_string())

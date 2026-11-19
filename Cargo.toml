@@ -13,5 +13,6 @@ csv = "1.4"
 libc = "0.2"
 png = "0.17"
 serde = { version = "1", features = ["derive"] }
+subtle = "2.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }

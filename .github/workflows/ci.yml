@@ -8,6 +8,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     env:
+      API_KEY: ci-preview-key
       PORT: "18080"
       REVISION: ${{ github.sha }}
     steps:
@@ -21,12 +22,21 @@ jobs:
           bin/check-deploy http://127.0.0.1:18080 "$REVISION"
           docker compose exec -T web sh -c 'test "$(id -u)" = 10001'
           output="$(mktemp)"
+          headers="$(mktemp)"
+          url=http://127.0.0.1:18080/preview
+          status="$(curl --silent --show-error --dump-header "$headers" --output "$output" \
+            --write-out '%{http_code}' --header 'Content-Type: text/csv' --data-binary 'Item,Units' "$url")"
+          test "$status" = 401
+          grep -qi '^www-authenticate: bearer' "$headers"
+          status="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' \
+            --header 'Authorization: Bearer wrong-key' --header 'Content-Type: text/csv' --data-binary 'Item,Units' "$url")"
+          test "$status" = 401
           printf 'Item,Units\nCartons,120\n' |
             curl --fail --silent --show-error --header 'Content-Type: text/csv' \
-              --data-binary @- --output "$output" http://127.0.0.1:18080/preview
+              --header "Authorization: Bearer $API_KEY" --data-binary @- --output "$output" "$url"
           python3 -c 'import sys; assert open(sys.argv[1], "rb").read(8) == b"\x89PNG\r\n\x1a\n"' "$output"
           curl --fail --silent --show-error --header 'Content-Type: application/octet-stream' \
-            --data-binary @tests/fixtures/inventory.xlsx --output "$output" http://127.0.0.1:18080/preview
+            --header "Authorization: Bearer $API_KEY" --data-binary @tests/fixtures/inventory.xlsx --output "$output" "$url"
           python3 -c 'import sys; assert open(sys.argv[1], "rb").read(8) == b"\x89PNG\r\n\x1a\n"' "$output"
       - name: Show container logs on failure
         if: failure()
