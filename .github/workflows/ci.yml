@@ -1,0 +1,36 @@
+name: CI
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    env:
+      PORT: "18080"
+      REVISION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the container
+        run: |
+          ./.hatchbox/build
+          docker compose up --detach --no-build --remove-orphans --wait --wait-timeout 90
+      - name: Check the running release
+        run: |
+          bin/check-deploy http://127.0.0.1:18080 "$REVISION"
+          docker compose exec -T web sh -c 'test "$(id -u)" = 10001'
+          output="$(mktemp)"
+          printf 'Item,Units\nCartons,120\n' |
+            curl --fail --silent --show-error --header 'Content-Type: text/csv' \
+              --data-binary @- --output "$output" http://127.0.0.1:18080/preview
+          python3 -c 'import sys; assert open(sys.argv[1], "rb").read(8) == b"\x89PNG\r\n\x1a\n"' "$output"
+          curl --fail --silent --show-error --header 'Content-Type: application/octet-stream' \
+            --data-binary @tests/fixtures/inventory.xlsx --output "$output" http://127.0.0.1:18080/preview
+          python3 -c 'import sys; assert open(sys.argv[1], "rb").read(8) == b"\x89PNG\r\n\x1a\n"' "$output"
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Stop the container
+        if: always()
+        run: docker compose down --timeout 30

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "Usage: bin/check-deploy APP_ORIGIN EXPECTED_COMMIT_SHA" >&2
+  exit 2
+fi
+
+curl --fail --silent --show-error \
+  --connect-timeout 5 --max-time 10 \
+  --retry 10 --retry-delay 2 --retry-all-errors \
+  "${1%/}/healthz" |
+  python3 -c '
+import json, sys
+
+health = json.load(sys.stdin)
+if health.get("status") != "ok":
+    raise SystemExit("Deployment is not healthy")
+actual, expected = health.get("revision"), sys.argv[1]
+if actual != expected:
+    raise SystemExit(f"Wrong revision: expected {expected}, got {actual}")
+print(f"Healthy deployment: {actual}")
+' "$2"

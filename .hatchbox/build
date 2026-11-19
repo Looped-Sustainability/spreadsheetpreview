@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+: "${PORT:?Hatchbox must provide the app port}"
+: "${REVISION:?Hatchbox must provide the commit revision}"
+export REVISION
+
+docker info >/dev/null
+docker compose version >/dev/null
+docker compose config --quiet
+docker compose build --pull
+docker compose down --timeout 30

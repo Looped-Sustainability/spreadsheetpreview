@@ -12,7 +12,10 @@ use axum::body::{Body, to_bytes};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::{Router, routing::post};
+use axum::{
+    Json, Router,
+    routing::{get, post},
+};
 use table::Options;
 use tokio::sync::Semaphore;
 
@@ -29,10 +32,24 @@ struct Service {
 pub fn router(executable: PathBuf) -> Router {
     Router::new()
         .route("/preview", post(preview))
+        .route("/healthz", get(health))
         .with_state(Service {
             slots: Arc::new(Semaphore::new(2)),
             executable,
         })
+}
+
+#[derive(serde::Serialize)]
+struct Health {
+    status: &'static str,
+    revision: &'static str,
+}
+
+async fn health() -> Json<Health> {
+    Json(Health {
+        status: "ok",
+        revision: option_env!("BUILD_REVISION").unwrap_or("development"),
+    })
 }
 
 async fn preview(
