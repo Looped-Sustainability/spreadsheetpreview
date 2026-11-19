@@ -39,3 +39,8 @@ The server uses a consistent table style and displays saved formula results when
 CSV files must use UTF-8 and commas. The upload limit is 8 MiB.
 XLSX archives can contain up to 4,096 entries and declare up to 64 MiB of uncompressed data.
 The server accepts two requests at a time. Extra requests receive HTTP 503.
+
+## License
+
+The service uses the [MIT License](LICENSE). The bundled DejaVu Sans font uses
+the license in [assets/FONT-LICENSE.txt](assets/FONT-LICENSE.txt).
