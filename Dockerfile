@@ -12,7 +12,7 @@ RUN BUILD_REVISION="$REVISION" cargo build --release --locked --offline
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/spreadsheetpreview /usr/local/bin/spreadsheetpreview
-COPY LICENSE assets/FONT-LICENSE.txt /usr/share/doc/spreadsheetpreview/
+COPY LICENSE assets/*LICENSE.txt /usr/share/doc/spreadsheetpreview/
 USER 10001:10001
 ENV BIND_ADDR=0.0.0.0:8080
 EXPOSE 8080

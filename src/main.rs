@@ -2,7 +2,7 @@ use std::{env, io};
 
 fn main() -> io::Result<()> {
     if spreadsheetpreview::is_worker(env::args_os().nth(1).as_deref()) {
-        let args: Vec<_> = env::args().skip(2).collect();
+        let args: Vec<_> = env::args().skip(1).collect();
         std::process::exit(spreadsheetpreview::worker(&args));
     }
     serve()

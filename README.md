@@ -7,7 +7,7 @@ no uploads on disk.
 
 ## Build and run
 
-Build with Rust 1.88 or later on Linux or macOS. Set `API_KEY` before starting
+Build with Rust 1.92 or later on Linux or macOS. Set `API_KEY` before starting
 the server. To generate a key for local use, run this command.
 
 ```sh
@@ -80,8 +80,30 @@ server accepts two preview requests at a time.
 | 408 | The upload took more than 15 seconds. |
 | 413 | The server could not read the body within the upload limit. |
 | 415 | The server does not accept the request's content type. |
-| 422 | The server could not read the file or find the requested worksheet. |
+| 422 | The server could not render the file or find the requested worksheet. |
 | 503 | Both preview slots are busy. Retry after a delay. |
+
+## Render the first page of a PDF
+
+Send the PDF bytes in the body of `POST /pdf_render`. Use
+`Content-Type: application/pdf` and the same bearer key as `/preview`.
+
+```sh
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/pdf' \
+  -H "Authorization: Bearer $API_KEY" \
+  --data-binary @document.pdf \
+  "${BASE_URL:-http://127.0.0.1:3000}/pdf_render" \
+  -o first-page.png
+```
+
+The default response is `image/png`. For JPEG, add `?format=jpg` or
+`?format=jpeg` and save the response as `first-page.jpg`. The JPEG content
+type is `image/jpeg`. Both formats use a white background and a maximum
+of 1,600 pixels on the longest side.
+
+The same 8 MiB upload limit applies. Remove password protection before you
+upload a PDF.
 
 `GET /healthz` reports `status` and the compiled `revision` without a key.
 <!-- api-guide:end -->
@@ -118,9 +140,11 @@ cargo build --locked --release
 ```
 
 [CI](.github/workflows/ci.yml) builds the Docker image, checks the running
-revision, and sends CSV and XLSX requests to the container.
+revision, and sends CSV, XLSX, and PDF requests to the container.
 
 ## License
 
 The service uses the [MIT License](LICENSE). The bundled DejaVu Sans font uses
 the license in [assets/FONT-LICENSE.txt](assets/FONT-LICENSE.txt).
+See the notices for [PDF fonts](assets/PDF-FONT-LICENSE.txt) and
+[JPEG encoding](assets/JPEG-LICENSE.txt).

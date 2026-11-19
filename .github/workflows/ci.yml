@@ -40,6 +40,23 @@ jobs:
           curl --fail --silent --show-error --header 'Content-Type: application/octet-stream' \
             --header "Authorization: Bearer $API_KEY" --data-binary @tests/fixtures/inventory.xlsx --output "$output" "$url"
           python3 -c 'import sys; assert open(sys.argv[1], "rb").read(8) == b"\x89PNG\r\n\x1a\n"' "$output"
+      - name: Render the first PDF page
+        run: |
+          output="$(mktemp)"
+          url=http://127.0.0.1:18080/pdf_render
+          status="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' \
+            --header 'Content-Type: application/pdf' --data-binary @tests/fixtures/first-page.pdf "$url")"
+          test "$status" = 401
+          mime="$(curl --fail --silent --show-error --output "$output" --write-out '%{content_type}' \
+            --header "Authorization: Bearer $API_KEY" --header 'Content-Type: application/pdf' \
+            --data-binary @tests/fixtures/first-page.pdf "$url")"
+          test "$mime" = image/png
+          python3 -c 'import struct, sys; header = open(sys.argv[1], "rb").read(24); assert header[:8] == b"\x89PNG\r\n\x1a\n"; assert struct.unpack(">II", header[16:24]) == (640, 360)' "$output"
+          mime="$(curl --fail --silent --show-error --output "$output" --write-out '%{content_type}' \
+            --header "Authorization: Bearer $API_KEY" --header 'Content-Type: application/pdf' \
+            --data-binary @tests/fixtures/first-page.pdf "$url?format=jpg")"
+          test "$mime" = image/jpeg
+          python3 -c 'import sys; image = open(sys.argv[1], "rb").read(); assert image.startswith(b"\xff\xd8") and image.endswith(b"\xff\xd9")' "$output"
       - name: Show container logs on failure
         if: failure()
         run: docker compose logs
