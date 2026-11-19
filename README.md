@@ -26,6 +26,8 @@ to change the address.
 
 ## Request a preview
 
+`GET /` returns a public JSON guide with a copyable request example.
+
 Send the file bytes directly in the body of `POST /preview`. Include
 `Authorization: Bearer YOUR_API_KEY`. On success, the server returns HTTP 200
 with `Content-Type: image/png`.

@@ -1,0 +1,26 @@
+{
+  "service": "Spreadsheet Preview",
+  "description": "Convert a CSV or Excel worksheet into a PNG table.",
+  "preview": {
+    "method": "POST",
+    "path": "/preview",
+    "authorization": "Bearer YOUR_API_KEY",
+    "body": "Send the file bytes directly in the request body.",
+    "content_types": {
+      "csv": "text/csv",
+      "xls": "application/octet-stream",
+      "xlsx": "application/octet-stream"
+    },
+    "response_type": "image/png",
+    "optional_query": {
+      "sheet": "Excel worksheet name. The default is the first worksheet.",
+      "max_rows": "Number of rows to preview.",
+      "max_cols": "Number of columns to preview."
+    }
+  },
+  "example": {
+    "instructions": "Set BASE_URL to this server's origin and set API_KEY to its bearer key. Replace inventory.csv with your CSV file path.",
+    "curl": "curl --fail-with-body -H \"Authorization: Bearer $API_KEY\" -H 'Content-Type: text/csv' --data-binary @inventory.csv \"$BASE_URL/preview\" -o preview.png"
+  },
+  "health": "/healthz"
+}

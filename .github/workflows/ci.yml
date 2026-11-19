@@ -20,6 +20,8 @@ jobs:
       - name: Check the running release
         run: |
           bin/check-deploy http://127.0.0.1:18080 "$REVISION"
+          curl --fail --silent --show-error http://127.0.0.1:18080/ |
+            python3 -c 'import json, sys; guide = json.load(sys.stdin); assert guide["preview"]["method"] == "POST" and guide["preview"]["path"] == "/preview" and "Authorization: Bearer" in guide["example"]["curl"]'
           docker compose exec -T web sh -c 'test "$(id -u)" = 10001'
           output="$(mktemp)"
           headers="$(mktemp)"

@@ -38,11 +38,19 @@ pub fn router(executable: PathBuf, api_key: String) -> Router {
             Arc::<str>::from(api_key),
             require_api_key,
         ))
+        .route("/", get(api_guide))
         .route("/healthz", get(health))
         .with_state(Service {
             slots: Arc::new(Semaphore::new(2)),
             executable,
         })
+}
+
+async fn api_guide() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        include_str!("api-guide.json"),
+    )
 }
 
 async fn require_api_key(
