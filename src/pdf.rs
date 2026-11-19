@@ -1,5 +1,5 @@
 use hayro::hayro_interpret::InterpreterSettings;
-use hayro::hayro_syntax::Pdf;
+use hayro::hayro_syntax::{Pdf, PdfData};
 use hayro::vello_cpu::color::palette::css::WHITE;
 use hayro::{PixmapSettings, RenderCache, RenderSettings};
 use serde::Deserialize;
@@ -36,7 +36,23 @@ pub struct Options {
     pub format: Format,
 }
 
-pub fn first_page(data: Vec<u8>, format: Format) -> Result<Vec<u8>, &'static str> {
+pub fn render_upload(format: Format, limit: u64) -> Result<Vec<u8>, &'static str> {
+    let fd = io::stdin()
+        .as_fd()
+        .try_clone_to_owned()
+        .map_err(|_| "could not open PDF upload")?;
+    let file = File::from(fd);
+    let meta = file.metadata().map_err(|_| "could not read PDF upload")?;
+    if !meta.is_file() || meta.nlink() != 0 || meta.len() == 0 || meta.len() > limit {
+        return Err("invalid PDF upload file");
+    }
+    // The server passes an unnamed file and flushes all writes before starting the worker.
+    let data = unsafe { memmap2::MmapOptions::new().map(&file) }
+        .map_err(|_| "could not map PDF upload")?;
+    first_page(Arc::new(data), format)
+}
+
+fn first_page(data: impl Into<PdfData>, format: Format) -> Result<Vec<u8>, &'static str> {
     let pdf = Pdf::new(data).map_err(|_| "invalid or password-protected PDF")?;
     let page = pdf.pages().iter().next().ok_or("PDF has no pages")?;
     let (width, height) = page.render_dimensions();
@@ -82,3 +98,8 @@ pub fn first_page(data: Vec<u8>, format: Format) -> Result<Vec<u8>, &'static str
     }
     Ok(output)
 }
+use std::fs::File;
+use std::io;
+use std::os::fd::AsFd;
+use std::os::unix::fs::MetadataExt;
+use std::sync::Arc;

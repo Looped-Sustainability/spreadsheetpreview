@@ -16,8 +16,8 @@ on `127.0.0.1` to port 8080 in the container. Caddy handles HTTPS.
 
 Hatchbox runs [the repository build hook](../.hatchbox/build). If a custom build
 script overrides that hook, set the custom script to `./.hatchbox/build`. The
-hook builds the new image before it stops the old container. The service stores
-no uploads on disk and needs no volume.
+hook builds the new image before it stops the old container. The service needs
+no persistent volume. The container uses its temporary directory for PDF uploads.
 
 Before deploying, set `API_KEY` in the Hatchbox app environment. Generate a
 separate key for this app with `openssl rand -hex 32`. Every preview request

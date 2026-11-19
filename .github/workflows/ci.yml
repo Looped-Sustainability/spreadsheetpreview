@@ -57,6 +57,34 @@ jobs:
             --data-binary @tests/fixtures/first-page.pdf "$url?format=jpg")"
           test "$mime" = image/jpeg
           python3 -c 'import sys; image = open(sys.argv[1], "rb").read(); assert image.startswith(b"\xff\xd8") and image.endswith(b"\xff\xd9")' "$output"
+      - name: Check streamed PDF upload limits
+        run: |
+          output="$(mktemp)"
+          upload="$(mktemp)"
+          url=http://127.0.0.1:18080/pdf_render
+          python3 - "$upload" <<'PY'
+          from pathlib import Path
+          import sys
+
+          pdf = Path("tests/fixtures/first-page.pdf").read_bytes()
+          objects, index = pdf.split(b"\nxref\n", 1)
+          trailer, offset = index.rsplit(b"startxref\n", 1)
+          offset, eof = offset.split(b"\n", 1)
+          padding = b"% Upload padding\n" * 550_000
+          Path(sys.argv[1]).write_bytes(
+              objects + b"\n" + padding + b"xref\n" + trailer
+              + b"startxref\n" + str(int(offset) + len(padding)).encode() + b"\n" + eof
+          )
+          PY
+          curl --fail --silent --show-error --output "$output" \
+            --header "Authorization: Bearer $API_KEY" --header 'Content-Type: application/pdf' \
+            --header 'Transfer-Encoding: chunked' --data-binary @"$upload" "$url"
+          python3 -c 'import struct, sys; header = open(sys.argv[1], "rb").read(24); assert header[:8] == b"\x89PNG\r\n\x1a\n"; assert struct.unpack(">II", header[16:24]) == (640, 360)' "$output"
+          truncate -s 67108865 "$upload"
+          status="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $API_KEY" --header 'Content-Type: application/pdf' \
+            --header 'Transfer-Encoding: chunked' --data-binary @"$upload" "$url")"
+          test "$status" = 413
       - name: Show container logs on failure
         if: failure()
         run: docker compose logs

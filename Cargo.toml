@@ -11,10 +11,13 @@ axum = "0.8"
 calamine = "0.38"
 csv = "1.4"
 hayro = "0.9"
+http-body-util = "0.1"
 jpeg-encoder = "0.7"
 libc = "0.2"
+memmap2 = "0.9"
 png = "0.17"
 serde = { version = "1", features = ["derive"] }
 subtle = "2.6"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+tempfile = "3"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net", "sync", "time"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }

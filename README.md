@@ -2,8 +2,7 @@
 
 Spreadsheet Preview turns CSV, XLS, and XLSX files into PNG tables with row and
 column labels. One Rust executable runs the HTTP server and draws the image with
-its bundled font. The service returns the image in the same request and stores
-no uploads on disk.
+its bundled font. The service returns the image in the same request.
 
 ## Build and run
 
@@ -69,16 +68,17 @@ The preview starts at A1 and shows **Partial sheet** if the row or column
 limit cuts off data. The renderer uses its own table style and displays saved
 formula results when the workbook contains them.
 
-CSV files must use UTF-8 and commas. The upload limit is 8 MiB. XLSX archives can
-contain up to 4,096 entries and declare up to 64 MiB of uncompressed data. The
-server accepts two preview requests at a time.
+CSV files must use UTF-8 and commas. Spreadsheet uploads have an 8 MiB limit
+and a 15-second deadline. XLSX archives can contain up to 4,096 entries and
+declare up to 64 MiB of uncompressed data. The server accepts two preview
+requests at a time across both upload endpoints.
 
 | HTTP status | Meaning |
 | --- | --- |
 | 400 | The body is empty or the query parameters are invalid. |
 | 401 | The bearer API key is missing or invalid. |
-| 408 | The upload took more than 15 seconds. |
-| 413 | The server could not read the body within the upload limit. |
+| 408 | The upload exceeded its time limit. |
+| 413 | The upload exceeded its size limit. |
 | 415 | The server does not accept the request's content type. |
 | 422 | The server could not render the file or find the requested worksheet. |
 | 503 | Both preview slots are busy. Retry after a delay. |
@@ -102,8 +102,12 @@ The default response is `image/png`. For JPEG, add `?format=jpg` or
 type is `image/jpeg`. Both formats use a white background and a maximum
 of 1,600 pixels on the longest side.
 
-The same 8 MiB upload limit applies. Remove password protection before you
-upload a PDF.
+PDF uploads have a 64 MiB limit and a 60-second upload deadline. The server
+streams each upload to an unnamed temporary file, then renders only the first
+page. It needs the full upload because the PDF can store its index at the end.
+The server discards unfinished uploads and releases each temporary file after
+the render worker exits.
+Remove password protection before you upload a PDF.
 
 `GET /healthz` reports `status` and the compiled `revision` without a key.
 <!-- api-guide:end -->

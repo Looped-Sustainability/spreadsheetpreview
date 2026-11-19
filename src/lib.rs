@@ -3,13 +3,14 @@ mod render;
 mod table;
 
 use std::ffi::OsStr;
+use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{Body, Bytes, HttpBody, to_bytes};
 use axum::extract::{Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
@@ -18,13 +19,21 @@ use axum::{
     Json, Router,
     routing::{get, post},
 };
+use http_body_util::BodyExt;
 use subtle::ConstantTimeEq;
 use table::Options;
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const UPLOAD: usize = 8 * 1024 * 1024;
+const PDF_UPLOAD: u64 = 64 * 1024 * 1024;
 const OLE: &[u8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1";
 type Failure = (StatusCode, &'static str);
+const PDF_TOO_LARGE: Failure = (StatusCode::PAYLOAD_TOO_LARGE, "PDF exceeds 64 MiB");
+const PDF_STORAGE_FAILED: Failure = (
+    StatusCode::INTERNAL_SERVER_ERROR,
+    "could not store PDF upload",
+);
 
 #[derive(Clone)]
 struct Service {
@@ -33,12 +42,15 @@ struct Service {
 }
 
 impl Service {
-    async fn upload(&self, body: Body) -> Result<(OwnedSemaphorePermit, Bytes), Failure> {
-        let permit = self
-            .slots
+    fn acquire_slot(&self) -> Result<OwnedSemaphorePermit, Failure> {
+        self.slots
             .clone()
             .try_acquire_owned()
-            .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "preview workers are busy"))?;
+            .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "preview workers are busy"))
+    }
+
+    async fn upload(&self, body: Body) -> Result<(OwnedSemaphorePermit, Bytes), Failure> {
+        let permit = self.acquire_slot()?;
         let bytes = tokio::time::timeout(Duration::from_secs(15), to_bytes(body, UPLOAD))
             .await
             .map_err(|_| (StatusCode::REQUEST_TIMEOUT, "upload timed out"))?
@@ -189,14 +201,17 @@ async fn pdf_render(
     ) {
         return Err((StatusCode::UNSUPPORTED_MEDIA_TYPE, "send a raw PDF file"));
     }
-    let (permit, bytes) = service.upload(body).await?;
+    let permit = service.acquire_slot()?;
+    let file = tokio::time::timeout(Duration::from_secs(60), spool_pdf(body))
+        .await
+        .map_err(|_| (StatusCode::REQUEST_TIMEOUT, "PDF upload timed out"))??;
     let image = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let output = run_worker(
             Command::new(service.executable)
                 .arg("--pdf")
                 .arg(options.format.name()),
-            &bytes,
+            WorkerInput::File(file),
         )?;
         if !output.status.success() {
             return Err((
@@ -209,6 +224,35 @@ async fn pdf_render(
     .await
     .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "PDF rendering failed"))??;
     Ok(image_response(options.format.mime(), image))
+}
+
+async fn spool_pdf(mut body: Body) -> Result<File, Failure> {
+    if body.size_hint().lower() > PDF_UPLOAD {
+        return Err(PDF_TOO_LARGE);
+    }
+    let file = tokio::task::spawn_blocking(tempfile::tempfile)
+        .await
+        .map_err(|_| PDF_STORAGE_FAILED)?
+        .map_err(|_| PDF_STORAGE_FAILED)?;
+    let mut file = BufWriter::with_capacity(128 * 1024, tokio::fs::File::from_std(file));
+    let mut size = 0;
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|_| (StatusCode::BAD_REQUEST, "could not read PDF upload"))?;
+        if let Some(bytes) = frame.data_ref() {
+            size += bytes.len() as u64;
+            if size > PDF_UPLOAD {
+                return Err(PDF_TOO_LARGE);
+            }
+            file.write_all(bytes)
+                .await
+                .map_err(|_| PDF_STORAGE_FAILED)?;
+        }
+    }
+    if size == 0 {
+        return Err((StatusCode::BAD_REQUEST, "empty upload"));
+    }
+    file.flush().await.map_err(|_| PDF_STORAGE_FAILED)?;
+    Ok(file.into_inner().into_std().await)
 }
 
 fn media_type(headers: &HeaderMap) -> String {
@@ -242,7 +286,7 @@ fn workbook_process(executable: &Path, data: &[u8], options: &Options) -> Result
             .arg(rows.to_string())
             .arg(cols.to_string())
             .args(&options.sheet),
-        data,
+        WorkerInput::Bytes(data),
     )?;
     if !output.status.success() {
         let message = match output.stdout.as_slice() {
@@ -256,10 +300,24 @@ fn workbook_process(executable: &Path, data: &[u8], options: &Options) -> Result
     Ok(output.stdout)
 }
 
-fn run_worker(command: &mut Command, data: &[u8]) -> Result<Output, Failure> {
+enum WorkerInput<'a> {
+    Bytes(&'a [u8]),
+    File(File),
+}
+
+fn run_worker(command: &mut Command, input: WorkerInput<'_>) -> Result<Output, Failure> {
+    let bytes = match input {
+        WorkerInput::Bytes(bytes) => {
+            command.stdin(Stdio::piped());
+            Some(bytes)
+        }
+        WorkerInput::File(file) => {
+            command.stdin(file);
+            None
+        }
+    };
     let mut child = command
         .env_remove("API_KEY")
-        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -269,7 +327,9 @@ fn run_worker(command: &mut Command, data: &[u8]) -> Result<Output, Failure> {
                 "could not start render worker",
             )
         })?;
-    let write = child.stdin.take().unwrap().write_all(data);
+    let write = bytes
+        .map(|bytes| child.stdin.take().unwrap().write_all(bytes))
+        .transpose();
     let output = child
         .wait_with_output()
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "render worker failed"))?;
@@ -338,20 +398,11 @@ pub fn worker(args: &[String]) -> i32 {
     let Some((mode, args)) = args.split_first() else {
         return 2;
     };
-    let mut data = Vec::new();
-    if std::io::stdin()
-        .take(UPLOAD as u64 + 1)
-        .read_to_end(&mut data)
-        .is_err()
-        || data.len() > UPLOAD
-    {
-        return 2;
-    }
     let image = match mode.as_str() {
-        "--workbook" => render_workbook(&data, args),
+        "--workbook" => render_workbook(args),
         "--pdf" => match args.first().map(String::as_str) {
-            Some("png") => pdf::first_page(data, pdf::Format::Png),
-            Some("jpeg") => pdf::first_page(data, pdf::Format::Jpeg),
+            Some("png") => pdf::render_upload(pdf::Format::Png, PDF_UPLOAD),
+            Some("jpeg") => pdf::render_upload(pdf::Format::Jpeg, PDF_UPLOAD),
             _ => return 2,
         },
         _ => return 2,
@@ -366,7 +417,7 @@ pub fn worker(args: &[String]) -> i32 {
     }
 }
 
-fn render_workbook(data: &[u8], args: &[String]) -> Result<Vec<u8>, &'static str> {
+fn render_workbook(args: &[String]) -> Result<Vec<u8>, &'static str> {
     let (Some(rows), Some(cols)) = (
         args.first().and_then(|s| s.parse().ok()),
         args.get(1).and_then(|s| s.parse().ok()),
@@ -378,7 +429,15 @@ fn render_workbook(data: &[u8], args: &[String]) -> Result<Vec<u8>, &'static str
         max_rows: Some(rows),
         max_cols: Some(cols),
     };
-    table::excel(data, &options).and_then(|table| render::png(&table))
+    let mut data = Vec::new();
+    std::io::stdin()
+        .take(UPLOAD as u64 + 1)
+        .read_to_end(&mut data)
+        .map_err(|_| "could not read workbook")?;
+    if data.len() > UPLOAD {
+        return Err("workbook exceeds 8 MiB");
+    }
+    table::excel(&data, &options).and_then(|table| render::png(&table))
 }
 
 pub fn is_worker(arg: Option<&OsStr>) -> bool {
